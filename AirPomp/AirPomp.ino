@@ -1,10 +1,8 @@
 /*
   Rui Santos
   Complete project details at Complete project details at https://RandomNerdTutorials.com/esp8266-nodemcu-http-get-post-arduino/
-
   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
   The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
   Code compatible with ESP8266 Boards Version 3.0.0 or above
   (see in Tools > Boards > Boards Manager > ESP8266)
 */
@@ -114,6 +112,15 @@ void setup() {
   }
 }
 
+String ByteArrToStr(byte* arr, int lengthArr){
+	String out;
+	
+	for (int i = 0; i < lengthArr; i++)
+		out += (char)arr[i];
+	
+	return out;
+}
+
 void loop() {
   //Send an HTTP POST request every 10 minutes
   if ((millis() - lastTime) > timerDelay) {
@@ -150,7 +157,7 @@ void loop() {
         int len = http.getSize();
 
         // create buffer for read
-        uint8_t buff[128] = { 0 };
+        uint8_t buff[256] = { 0 };
 
         // get tcp stream
         WiFiClient * stream = http.getStreamPtr();
@@ -163,37 +170,80 @@ void loop() {
         DeviceWord += '"';
         DeviceWord += ":{";
         Serial.println(DeviceWord);
+		
+		String buff;
+		int lenBlock = 256;
+		uint8_t maxLenWord = 50;
+		String searchWords[4];
+		searchWords[0] = "Devices";
+		searchWords[0] += '"';
+		searchWords[0] += ":[{";
+		searchWords[1] = "DeviceName";
+		searchWords[1] += '"';
+		searchWords[1] += ':';
+		searchWords[2] = "Device";
+		searchWords[2] += '"';
+		searchWords[2] += ":{";
+		searchWords[3] = "Power";
+		searchWords[3] += '"';
+		searchWords[3] += ":";
+		uint8_t searchIdx = 0;
+		
+    while (http.connected() && (len > 0 || len == -1)) {
+      // get available data size
+      size_t size = stream->available();
 
-        while (http.connected() && (len > 0 || len == -1)) {
-          // get available data size
-          size_t size = stream->available();
+      if (size) {
+        // read up to 128 byte
+        int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
 
-          if (size) {
-            // read up to 128 byte
-            int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-
-            Serial.write(buff, c);
-//            // write it to Serial
-//            if (strstr((const char*)buff, DeviceWord.c_str()) && !findDevice) {
-//              countDevice++;
-//              findDevice = true;
-//            }
-//            else if (findDevice && strstr((const char*)buff, ("Power").c_str())){
-//              findPower = true;
-//            }
-//            else if (findDevice && findPower && strstr((const char*)buff, ("true").c_str()) || strstr((const char*)buff, ("false").c_str()))
-
-            if (len > 0) {
-              len -= c;
-            }
-          }
-          delay(1);
-
+        Serial.write(buff, c);
+			
+        String k = ByteArrToStr(buff, c);
+        
+        if (buff == "") buff = k;
+        else {
+          String buffK = k;
+          k = buffK + k;
+          buff = k;
         }
-        Serial.println();
-        if (countDevice > 0)
-          Serial.println("Finded Device: " + String(countDevice));
-      }
+        
+        if (searchIdx > 3) 
+          searchIdx = 0;
+
+        for (int i = searchIdx; i < 4; i++) {
+          int idx = k.indexOf(searchWords[i]);
+          if (idx == -1) {
+            searchIdx += 1;
+            uint8_t lenData = 0;
+            
+            if (k.lenght() - idx < maxLenWord) {
+              searchIdx--;
+              bread;
+            }
+
+            for (int y = 0; y < k.lenght(); i++) {
+              if (k[y] != ',') lenData += 1
+              else break;
+            }
+
+            if (i == 1 || i == 3)
+              Serial.println(k.substring(idx+searchWords[i].lenght(), idx+lenData).replace('"',''))
+          } 
+          else break;
+        }
+        
+              if (len > 0) {
+                len -= c;
+              }
+            }
+            delay(1);
+
+          }
+          Serial.println();
+          if (countDevice > 0)
+            Serial.println("Finded Device: " + String(countDevice));
+        }
 
 
 
