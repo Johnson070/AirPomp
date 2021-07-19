@@ -3,6 +3,7 @@ s = f.readline()
 
 buff = []
 lenBlock = 256
+maxLenWord = 50
 outWords = []
 
 searchWords = ['Devices":[{', 'DeviceName":','Device":{','Power":']
@@ -26,7 +27,7 @@ for i in range(0,len(s),lenBlock):
             searchIdx += 1
             lenData = 0
             
-            if len(k) - idx < 40:
+            if len(k) - idx < maxLenWord:
                 searchIdx -= 1
                 break;
                 
