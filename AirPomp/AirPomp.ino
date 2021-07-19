@@ -81,7 +81,7 @@ void setup() {
     http.addHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:73.0) Gecko/20100101 Firefox/73.0");
     http.addHeader("Content-Type", "application/json");
     int httpResponseCode = http.POST(
-                             "{\"Email\":\"anton.shokin@gmail.com\", \"Password\":\"Qawsed123\",\"Language\":0,\"AppVersion\":\"1.19.1.1\",\"Persist\":true, \"CaptchaResponse\":null}"
+                             "{\"Email\":\"anton.shokin@gmail.com\", \"Password\":\"Qawsed123\",\"Language\":16,\"AppVersion\":\"1.19.1.1\",\"Persist\":true, \"CaptchaResponse\":null}"
                            );
 
     if (httpResponseCode > 0) {
