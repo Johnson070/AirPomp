@@ -12,47 +12,67 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <ESP8266mDNS.h>
-#include <FS.h>
+#include <LittleFS.h>
+#include <ESPAsyncTCP.h>
+#include "ESPAsyncWebServer.h"
 
-const char* ssid = "WHome";
-const char* password = "adrenalin";
+const char* ssid = "Home";
+const char* password = "89052299312";
 
-//Your Domain name with URL path or IP address with path
 String serverName = "https://app.melcloud.com/Mitsubishi.Wifi.Client";
 
-// the following variables are unsigned longs because the time, measured in
-// milliseconds, will quickly become a bigger number than can be stored in an int.
 unsigned long lastTime = 0;
-// Timer set to 10 minutes (600000)
-//unsigned long timerDelay = 600000;
-// Set timer to 5 seconds (5000)
 unsigned long timerDelay = 5000;
 
 String token;
 
 struct {
-  char email[50];
-  char password[50];
-  char user[20];
-  char token[30];
-  char ssid[30];
-  char pass_wifi[30];
-} data;
+  String SSID;
+  String SSIDPass;
+  String email;
+  String pass;
+} cred;
+
+String processor(const String& var) {
+  if (var == "SSID") return "1";
+  else return "NODATA";
+}
 
 void setup() {
   Serial.begin(115200);
+  delay(500);
 
-  if (SPIFFS.begin())
-  {
-    Serial.println("SPIFFS Initialize....ok");
-  }
-  else
-  {
-    Serial.println("SPIFFS Initialization...failed");
+  if (LittleFS.begin()) {
+    Serial.println("LittleFS Initialize....ok");
+  } else {
+    Serial.println("LittleFS Initialization...failed");
   }
 
+  File settings = LittleFS.open("/settings.json", "r");
+  if (settings) {
+    String json;
+    while (settings.available()) {
+      json += (char)settings.read();
+    }
+    Serial.println(json);
+    settings.close();
+    StaticJsonDocument<512> jsonSettings;
 
-  WiFi.begin(ssid, password);
+    DeserializationError error = deserializeJson(jsonSettings, json);
+
+    if (error) {
+      Serial.println(error.c_str());
+      return;
+    }
+
+    cred.SSID = jsonSettings["SSID"].as<String>();
+    cred.SSIDPass = jsonSettings["SSIDPass"].as<String>();
+    cred.email = jsonSettings["email"].as<String>();
+    cred.pass = jsonSettings["pass"].as<String>();
+  }
+
+
+  WiFi.begin(cred.SSID.c_str(), cred.SSIDPass.c_str());
   Serial.println("Connecting");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -62,7 +82,7 @@ void setup() {
   Serial.print("Connected to WiFi network with IP Address: ");
   Serial.println(WiFi.localIP());
 
-  if (!MDNS.begin("airpump")) {             // Start the mDNS responder for esp8266.local
+  if (!MDNS.begin("waterpump")) {  // Start the mDNS responder for esp8266.local
     Serial.println("Error setting up MDNS responder!");
   }
   Serial.println("mDNS responder started");
@@ -70,17 +90,16 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
     client.setInsecure();
-    client.connect((serverName + "/Login/ClientLogin").c_str(), 433);
+    client.connect(serverName + "/Login/ClientLogin", 433);
     HTTPClient http;
 
-    http.begin(client, (serverName + "/Login/ClientLogin").c_str());
+    http.begin(client, serverName + "/Login/ClientLogin");
 
     // If you need an HTTP request with a content type: application/json, use the following:
     http.addHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:73.0) Gecko/20100101 Firefox/73.0");
     http.addHeader("Content-Type", "application/json");
     int httpResponseCode = http.POST(
-                             "{\"Email\":\"anton.shokin@gmail.com\", \"Password\":\"Qawsed123\",\"Language\":16,\"AppVersion\":\"1.19.1.1\",\"Persist\":true, \"CaptchaResponse\":null}"
-                           );
+                             "{\"Email\":\"" + cred.email + "\", \"Password\":\"" + cred.pass + "\",\"Language\":16,\"AppVersion\":\"1.19.1.1\",\"Persist\":true, \"CaptchaResponse\":null}");
 
     if (httpResponseCode > 0) {
       //Get the request response payload
@@ -112,13 +131,13 @@ void setup() {
   }
 }
 
-String ByteArrToStr(byte* arr, int lengthArr){
-	String out;
-	
-	for (int i = 0; i < lengthArr; i++)
-		out += (char)arr[i];
-	
-	return out;
+String ByteArrToStr(byte arr[], int lengthArr) {
+  String out;
+
+  for (int i = 0; i < lengthArr; i++)
+    out += (char)arr[i];
+
+  return out;
 }
 
 void loop() {
@@ -128,11 +147,11 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
       BearSSL::WiFiClientSecure client;
       client.setInsecure();
-      client.connect((serverName + "/User/ListDevices").c_str(), 433);
+      client.connect(serverName + "/User/ListDevices", 433);
       HTTPClient http;
 
       // Your Domain name with URL path or IP address with path
-      http.begin(client, (serverName + "/User/ListDevices").c_str());
+      http.begin(client, serverName + "/User/ListDevices");
 
       // Specify content-type header
       //http.addHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -160,104 +179,103 @@ void loop() {
         uint8_t buff[256] = { 0 };
 
         // get tcp stream
-        WiFiClient * stream = http.getStreamPtr();
+        WiFiClient* stream = http.getStreamPtr();
 
         // read all data from server
-        String SearchWord;
-        bool findDevice;
-        bool findPower;
-        String DeviceWord = "Device";
-        DeviceWord += '"';
-        DeviceWord += ":{";
-        Serial.println(DeviceWord);
-		
-		String buff;
-		int lenBlock = 256;
-		uint8_t maxLenWord = 50;
-		String searchWords[4];
-		searchWords[0] = "Devices";
-		searchWords[0] += '"';
-		searchWords[0] += ":[{";
-		searchWords[1] = "DeviceName";
-		searchWords[1] += '"';
-		searchWords[1] += ':';
-		searchWords[2] = "Device";
-		searchWords[2] += '"';
-		searchWords[2] += ":{";
-		searchWords[3] = "Power";
-		searchWords[3] += '"';
-		searchWords[3] += ":";
-		uint8_t searchIdx = 0;
-		
-    while (http.connected() && (len > 0 || len == -1)) {
-      // get available data size
-      size_t size = stream->available();
+        String buffBlock = "";
+        int lenBlock = 256;
+        uint8_t maxLenWord = 50;
+        String searchWords[5] = { "", "", "", "", "" };
+        searchWords[0] = "Devices";
+        searchWords[0] += '"';
+        searchWords[0] += ":[{";
+        searchWords[1] = "DeviceName";
+        searchWords[1] += '"';
+        searchWords[1] += ':';
+        searchWords[2] = '"';
+        searchWords[2] += "Device";
+        searchWords[2] += '"';
+        searchWords[2] += ":{";
+        searchWords[3] = '"';
+        searchWords[3] += "Power";
+        searchWords[3] += '"';
+        searchWords[3] += ':';
+        searchWords[4] = '"';
+        searchWords[4] += "RoomTemperature";
+        searchWords[4] += '"';
+        searchWords[4] += ':';
+        uint8_t searchIdx = 0;
 
-      if (size) {
-        // read up to 128 byte
-        int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+        while (http.connected() && (len > 0 || len == -1)) {
+          // get available data size
+          size_t size = stream->available();
 
-        Serial.write(buff, c);
-			
-        String k = ByteArrToStr(buff, c);
-        
-        if (buff == "") buff = k;
-        else {
-          String buffK = k;
-          k = buffK + k;
-          buff = k;
-        }
-        
-        if (searchIdx > 3) 
-          searchIdx = 0;
+          if (size) {
+            // read up to 128 byte
+            int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
 
-        for (int i = searchIdx; i < 4; i++) {
-          int idx = k.indexOf(searchWords[i]);
-          if (idx == -1) {
-            searchIdx += 1;
-            uint8_t lenData = 0;
-            
-            if (k.lenght() - idx < maxLenWord) {
-              searchIdx--;
-              bread;
+            String k = "";
+
+            for (int i = 0; i < c; i++)
+              k += (char)buff[i];
+
+
+            if (buffBlock == "") buffBlock = k;
+            else {
+              String buffK = k;
+              k = buffBlock + buffK;
+              buffBlock = buffK;
             }
 
-            for (int y = 0; y < k.lenght(); i++) {
-              if (k[y] != ',') lenData += 1
+            if (searchIdx > 4) searchIdx = 0;
+
+            for (int i = searchIdx; i < 5; i++) {
+              int idx = k.indexOf(searchWords[i]);
+
+              if (idx != -1) {
+                //                              Serial.print(idx);
+                //              Serial.print("  ");
+                //              Serial.print(i);
+                //              Serial.print("  ");
+                //              Serial.print(searchIdx);
+                //              Serial.print("  ");
+                //              Serial.print(searchWords[i]);
+                //              Serial.print("  ");
+                //              Serial.println(k);
+                searchIdx += 1;
+                int lenData = 0;
+
+                if (k.length() - idx < maxLenWord) {
+                  searchIdx--;
+                  break;
+                }
+
+                for (int y = idx; y < k.length(); y++) {
+                  if (k[y] != ',') lenData += 1;
+                  else break;
+                }
+
+                if (i == 1 || i == 3 || i == 4) Serial.println(k.substring(idx + searchWords[i].length(), idx + lenData));
+                else break;
+              }
               else break;
             }
 
-            if (i == 1 || i == 3)
-              Serial.println(k.substring(idx+searchWords[i].lenght(), idx+lenData).replace('"',''))
-          } 
-          else break;
-        }
-        
-              if (len > 0) {
-                len -= c;
-              }
+            if (len > 0) {
+              len -= c;
             }
-            delay(1);
-
           }
-          Serial.println();
-          if (countDevice > 0)
-            Serial.println("Finded Device: " + String(countDevice));
+          delay(1);
         }
-
-
-
-      // If you need an HTTP request with a content type: text/plain
-      //http.addHeader("Content-Type", "text/plain");
-      //int httpResponseCode = http.POST("Hello, World!");
+        Serial.println();
+      }
 
       Serial.print("HTTP Response code: ");
       Serial.println(httpResponseCode);
 
       // Free resources
       http.end();
-    }
-    else {
+    } else {
       Serial.println("WiFi Disconnected");
     }
     lastTime = millis();
