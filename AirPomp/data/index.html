@@ -1,0 +1,210 @@
+<html>
+<head>
+<title>ESP-01 MELCloud WaterPump</title>
+<link rel="stylesheet" type="text/css" href="style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+</head>
+<center>
+<body>
+<div id="header"><h1>ESP-01 Settings</h1></div>
+<p>Hello, %USER%</p>
+
+<div id="blockSet" class="data">
+<p id="texthelp">WiFi Settings</p>
+<p>SSID: <input type="text" id="SSID" value="%SSID%"></p>
+<p>Password: <input type="text" id="SSIDPass" value="%SSIDPASS%"></p>
+<p><a onclick="saveWifi()"><input type="button" value="Save" id="saveButton"></a></p>
+</div>
+
+<div id="blockSet" class="data">
+<p id="texthelp">MELCloud Settings</p>
+<p>EMail: <input type="text" id="EMAIL" value="%EMAIL%"></p>
+<p>Password: <input type="text" id="PASS" value="%PASS%"></p>
+<p><a onclick="saveMEL()"><input type="button" value="Save" id="saveButton"></a></p>
+</div>
+
+<div id="blockSet" style="">
+<p id="texthelp">Devices</p>
+<p id="devices"></p>
+<p><a onclick="autosetpomp()"><input type="checkbox" value="Refresh" id="saveButton"></a>Auto update power pomp</p>
+<p><a onclick="refresh()"><input type="button" value="Refresh" id="saveButton"></a></p>
+<p><a onclick="saveDevices()"><input type="button" value="Save" id="saveButton"></a></p>
+</div>
+<p>Current API token: %TOKEN%</p>
+<p>FREE RAM: %RAM% Kb</p>
+<p><a onclick="restart()"><input type="button" value="Reboot ESP" id="saveButton"></a></p>
+</body>
+<center>
+<script>
+    refresh();
+
+function restart() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+      }
+    };
+  
+  xhttp.open("GET", "/restart", true);
+  xhttp.send();
+}
+
+function refresh() {
+    var AP = false;
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        if (this.responseText != "") {
+          json = JSON.parse(this.responseText);
+          document.getElementById("devices").textContent = "";
+          for (var i = 0; json.length; i++) {
+            document.getElementById("devices").appendChild(document.createElement("p")).setAttribute('id','devicex'+i)
+            document.getElementById('devicex'+i).innerHTML = 
+            (i+1) + "| " + 
+            json[i]["name"] + 
+            '&nbsp;<input type="checkbox" readonly onclick="return false;"' + 
+            (json[i]["state"] == "true" ? "checked" : "") + '>&nbsp;' +  
+            json[i]["temp"] + 'C' + '&nbsp;' + json[i]["mac"] + 
+            ' <input type="number" id="device'+ i +'" name="' + 
+            json[i]["mac"] + '" value="1" min="1" max="8">' +
+            "<a onclick=\"setPompMode('"+json[i]["mac"]+"')\">"+
+            '<input type="button" id="btn'+json[i]["mac"]+'" value="'+(json[i]["state"] == "true" ? "ON" : "OFF")+'"></a>';
+          }
+        }
+        else {
+          AP = true;
+        }
+      }
+    };
+    xhttp.open("GET", "/devices", true);
+    xhttp.send();
+
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        json = JSON.parse(this.responseText);
+        for (var i = 0; i < 8; i++) {
+          if (AP) {
+            document.getElementById("devices").textContent = "";
+            for (var i = 0; json.length; i++) {
+              document.getElementById("devices").appendChild(document.createElement("p")).setAttribute('id','devicex'+i)
+              document.getElementById('devicex'+i).innerHTML = 
+              (i+1) + "| " + 
+              json[i]["name"] + 
+              '&nbsp;<input type="checkbox" readonly onclick="return false;"' + 
+              (json[i]["state"] == "true" ? "checked" : "") + '>&nbsp;' 
+              + json[i]["mac"] + 
+              ' <input type="number" id="device'+ i +'" name="' + 
+              json[i]["mac"] + '" value="'+json[i]["pin"]+'" min="1" max="8">' +
+              "<a onclick=\"setPompMode('"+json[i]["mac"]+"')\">"+
+              '<input type="button" id="btn'+json[i]["mac"]+'" value="'+(GetPompStatus(json[i]["mac"]) == "1" ? "ON" : "OFF")+'"></a>';
+            }
+          }
+
+
+          if (document.getElementById('device'+i) != 0 && document.getElementById('device'+i).name == json[i]["mac"]) {
+            document.getElementById('device'+i).value = json[i]['pin'];
+          }
+        }
+      }
+    };
+  
+    xhttp.open("GET", "/pomps", true);
+    xhttp.send();
+}
+
+function GetPompStatus(mac) {
+  var request = 'mac=' + mac;
+  
+  var state = '0';
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      state = this.responseText;
+    }
+  };
+
+  xhttp.open("GET", "/getpomp?"+request, true);
+  xhttp.send();
+
+  return state;
+}
+
+function setPompMode(mac) {
+  var request = 'mac=' + mac + '&state=' + (document.getElementById('btn'+mac).value == 'ON' ? "1" : "0");
+  
+  document.getElementById('btn'+mac).value = document.getElementById('btn'+mac).value == 'ON' ? "OFF" : "ON";
+
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+
+    }
+  };
+
+  xhttp.open("GET", "/setpomp?"+request, true);
+  xhttp.send();
+}
+        
+
+function saveWifi() {
+    var xhr = new XMLHttpRequest();
+
+    var params = 'ssid='+(document.getElementById("SSID").value)
+    +'&pass='+(document.getElementById("SSIDPass").value);
+
+    xhr.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        alert("Wifi settings saved!");
+      }
+    };
+    xhr.open("GET", '/saveWifi?' + params, true);
+
+
+    xhr.send();
+  }
+
+  function saveMEL() {
+    var xhr = new XMLHttpRequest();
+
+    var params = 'email='+(document.getElementById("EMAIL").value)
+    +'&pass='+(document.getElementById("PASS").value);
+
+    xhr.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        alert("MELCloud settings saved!");
+        location.reload();
+      }
+    };
+
+    xhr.open("GET", '/saveMEL?' + params, true);
+
+    xhr.send();
+  }
+
+  function saveDevices() {
+    var xhr = new XMLHttpRequest();
+
+    var params = '';
+
+    for (var i = 0; i < 8; i++) {
+      if (document.getElementById("device"+i) != null) {
+        if (params == '') params += document.getElementById('device'+i).name + '=' + document.getElementById('device'+i).value;
+        else params += '&' + document.getElementById('device'+i).name + '=' + document.getElementById('device'+i).value;
+      }
+    }
+
+    xhr.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        alert("Devices settings saved!");
+        location.reload();
+      }
+    };
+
+    xhr.open("GET", '/saveDevices?' + params, true);
+
+    xhr.send();
+  }
+</script>
+</html>

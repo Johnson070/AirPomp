@@ -1,0 +1,27 @@
+#header {
+    background-color: #9E9E9E;
+}
+
+#blockSet {
+    background-color: #E0E0E0;
+    padding: 5px;
+    border: 4px double black;
+    margin: 0px 0px 10px 0px;
+    border-radius: 15px;
+}    
+
+
+#saveButton {
+    padding: 10px 10% 10px 10%;
+    #background-color: #36f43b;
+}
+
+#texthelp{
+    font-size: 20px;
+    background-color: #03A9F4;
+    margin: 0 25% 0 25%;
+}
+
+.data {
+    width:45%;
+}
