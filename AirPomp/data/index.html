@@ -27,30 +27,58 @@
 <div id="blockSet" class="devicesDiv">
 <p id="texthelp">Devices</p>
 <p id="devices"></p>
-<p><a onclick="autosetpomp()"><input type="checkbox" value="Refresh" id="saveButton"></a>Auto update power pomp</p>
+<p><a onclick="autosetpomp()"><input type="checkbox" value="Refresh" id="autoupdatecheck"></a>Auto update power pomp</p>
 <p><a onclick="refresh()"><input type="button" value="Refresh" id="saveButton"></a></p>
 <p><a onclick="saveDevices()"><input type="button" value="Save" id="saveButton"></a></p>
 </div>
 <p>Current API token: %TOKEN%</p>
-<p>FREE RAM: %RAM% Kb</p>
+<p id="HEAP">FREE RAM: 0 Kb</p>
 <p><a onclick="restart()"><input type="button" value="Reboot ESP" id="saveButton"></a></p>
 </body>
 <center>
 <script>
     refresh();
 
+function autosetpomp() {
+
+  var request = 'update='+ (document.getElementById('autoupdatecheck').checked == true ? "1" : "0");
+  var xhttp = new XMLHttpRequest();
+  
+  xhttp.open("POST", "/autoupdate?" + request, true);
+  xhttp.send();
+}
+
 function restart() {
   var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-      if (this.readyState == 4 && this.status == 200) {
-      }
-    };
   
   xhttp.open("GET", "/restart", true);
   xhttp.send();
 }
 
 function refresh() {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var autoupdate = this.responseText == "1" ? true : false;
+      document.getElementById('autoupdatecheck').checked = autoupdate;
+    }
+  };
+
+  xhttp.open("GET", "/autoupdate", true);
+  xhttp.send();
+
+
+  var jsonPins = '';
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      jsonPins = JSON.parse(this.responseText);
+    }
+  };
+
+  xhttp.open("GET", "/getpins", true);
+  xhttp.send();
+
     var AP = false;
     var xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function() {
@@ -69,7 +97,7 @@ function refresh() {
             ' <input type="number" id="device'+ i +'" name="' + 
             json[i]["mac"] + '" value="1" min="1" max="8">' +
             "<a onclick=\"setPompMode('"+json[i]["mac"]+"')\">"+
-            '<input type="button" id="btn'+json[i]["mac"]+'" value="'+(json[i]["state"] == "true" ? "ON" : "OFF")+'"></a>';
+            '<input type="button" id="btn'+json[i]["mac"]+'" value="'+"OFF"+'"></a>';
           }
         }
         else {
@@ -105,6 +133,7 @@ function refresh() {
 
           if (document.getElementById('device'+i) != 0 && document.getElementById('device'+i).name == json[i]["mac"]) {
             document.getElementById('device'+i).value = json[i]['pin'];
+            document.getElementById('btn'+json[i]["mac"]).value = jsonPins[json[i]['pin']-1] == 1 ? "ON" : "OFF";
           }
         }
       }
@@ -132,16 +161,11 @@ function GetPompStatus(mac) {
 }
 
 function setPompMode(mac) {
-  var request = 'mac=' + mac + '&state=' + (document.getElementById('btn'+mac).value == 'ON' ? "1" : "0");
+  var request = 'mac=' + mac + '&state=' + (document.getElementById('btn'+mac).value == 'ON' ? "0" : "1");
   
   document.getElementById('btn'+mac).value = document.getElementById('btn'+mac).value == 'ON' ? "OFF" : "ON";
 
   var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-
-    }
-  };
 
   xhttp.open("GET", "/setpomp?"+request, true);
   xhttp.send();
@@ -206,5 +230,19 @@ function saveWifi() {
 
     xhr.send();
   }
+
+  setInterval(function () {
+    var xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function() {
+      if (this.readyState == 4 && this.status == 200) {
+        heap = this.responseText;
+        document.getElementById('HEAP').innerHTML = 'FREE HEAP: ' + heap + " Kb";
+      }
+    };
+    xhttp.open("GET", "/heap", true);
+    xhttp.send();
+
+    
+  }, 2000 ) ;
 </script>
 </html>

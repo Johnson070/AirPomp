@@ -10,16 +10,22 @@
 #include "ESPAsyncWebServer.h"
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <Wire.h>    // Required for I2C communication
+#include <PCF8574.h>
 
+#define MaxMELDevices 8
+
+PCF8574 expander;
 String MELCloud = "https://app.melcloud.com/Mitsubishi.Wifi.Client";
+
 
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
 AsyncWebServer server(80);
-String pomps[8];
-String rooms[8];
-uint8_t pins[8];
-bool pompsState[8];
+String pomps[MaxMELDevices];
+String rooms[MaxMELDevices];
+uint8_t pins[MaxMELDevices];
+bool pompsState[MaxMELDevices];
 bool APMode;
 bool autoMode = true;
 
@@ -41,7 +47,6 @@ String processor(const String& var) {
   else if (var == "PASS") return cred.pass;
   else if (var == "DEVICES") return "-----";
   else if (var == "TOKEN") return cred.token;
-  else if (var == "RAM") return String(ESP.getFreeHeap());
   else return "NODATA";
 }
 
@@ -60,7 +65,7 @@ bool LoginMELCloud() {
     int httpResponseCode = http.POST(
                              "{\"Email\":\"" + cred.email + "\", \"Password\":\"" + cred.pass + "\",\"Language\":16,\"AppVersion\":\"1.19.1.1\",\"Persist\":true, \"CaptchaResponse\":null}");
 
-    if (httpResponseCode > 0) {
+    if (httpResponseCode == 200) {
       //Get the request response payload
       String payload = http.getString();
       //Print the response payload
@@ -84,7 +89,7 @@ bool LoginMELCloud() {
       }
       else {
         Serial.println("Error connect to MELCloud!");
-         Serial.print(jsonBuffer["ErrorId"].as<int>());
+        Serial.print(jsonBuffer["ErrorId"].as<int>());
         http.end();
         return false;
       }
@@ -121,7 +126,7 @@ String GetDataFromMELCloud() {
     http.addHeader("Cookie", "policyaccepted=true");
     int httpResponseCode = http.GET();
 
-    if (httpResponseCode > 0) {
+    if (httpResponseCode == 200) {
       int countDevice;
       int len = http.getSize();
 
@@ -234,7 +239,7 @@ String GetDataFromMELCloud() {
         delay(1);
       }
 
-      StaticJsonDocument<768> docJson;
+      StaticJsonDocument<1024> docJson;
       JsonObject doc_device;
 
 
@@ -259,6 +264,11 @@ String GetDataFromMELCloud() {
         } else wordInStr += out[i];
       }
 
+      if (autoMode)
+        for (JsonObject elem : docJson.as<JsonArray>()) {
+          SetPompMode(elem["mac"].as<String>(), elem["state"].as<String>() == "true" ? true : false);
+        }
+
       String jsonOut;
       serializeJson(docJson, jsonOut);
 
@@ -276,7 +286,7 @@ String GetDataFromMELCloud() {
     }
 
     //Serial.print("HTTP Response code: ");
-   // Serial.println(httpResponseCode);
+    // Serial.println(httpResponseCode);
 
     // Free resources
     http.end();
@@ -305,11 +315,11 @@ void SaveSettingsToFS() {
   }
 }
 
-void SavePins(String pomps_save[], uint8_t pins_save[],String names[], uint8_t count) {
+void SavePins(String pomps_save[], uint8_t pins_save[], String names[], uint8_t count) {
   StaticJsonDocument<1024> doc;
   String json;
 
-    
+
   File settings = LittleFS.open("/pomps.json", "r");
   if (settings) {
     String json;
@@ -354,7 +364,7 @@ void SavePins(String pomps_save[], uint8_t pins_save[],String names[], uint8_t c
       }
     }
 
-    
+
 
     String out;
     serializeJson(doc, out);
@@ -388,15 +398,25 @@ void ConnectWIFI() {
 APModeGoto:
     APMode = true;
     WiFi.mode(WIFI_AP);
-    WiFi.softAP((const char*)"WaterPump",(const char*)"Qawsed123");
+    WiFi.softAP((const char*)"WaterPump", (const char*)"Qawsed123");
   }
 }
 
 void SetPompMode(String mac, bool state) {
-  for (int i = 0; i < 8; i++) {
-    if (pomps[i] == mac) {
-      pompsState[i] = state;
-      break;
+  for (int i = 0; i < MaxMELDevices; i++) {
+    if (pomps[i] != "") {
+      for (int y = 1; y < 9; y++) {
+        if (pomps[i] == mac && pins[i] == y) {
+          pompsState[pins[i]-1] = state;
+//          Serial.print(pomps[i]);
+//            Serial.print(" ");
+//            Serial.print(mac);
+//            Serial.print(" ");
+//            Serial.print(pins[i]);
+//            Serial.print(" ");
+//            Serial.println(i);
+        }
+      }
     }
   }
 }
@@ -405,11 +425,22 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
+  //expander.begin(0x20);
+
   if (LittleFS.begin()) {
     Serial.println("LittleFS Initialize....ok");
   } else {
     Serial.println("LittleFS Initialization...failed");
   }
+
+
+  //
+  //
+  //  expander.pinMode(0, OUTPUT);
+  //  expander.pinMode(1, OUTPUT);
+  //  expander.pinMode(2, OUTPUT);
+  //  expander.pinMode(3, OUTPUT);
+  //  expander.pinMode(4, OUTPUT);
 
   File settings = LittleFS.open("/settings.json", "r");
   if (settings) {
@@ -448,32 +479,32 @@ void setup() {
     if (error) {
       Serial.println(error.c_str());
     }
-    
-    uint8_t count= 0;
+
+    uint8_t count = 0;
     for (JsonObject elem : jsonPomps.as<JsonArray>()) {
-      
+
       pomps[count] = elem["mac"].as<String>(); // "323423423423423", "323423423423423", "323423423423423", ...
       pins[count] = elem["pin"].as<uint8_t>(); // 8, 8, 8, 8, 8, 8, 8, 8
       count++;
     }
 
-    for (uint8_t i = count; i < 8;i++)
+    for (uint8_t i = count; i < 8; i++)
     {
       pomps[count] = "";
       pins[count] = 255;
     }
   }
 
-  for (uint8_t i = 0; i < 8; i++) {
+  for (uint8_t i = 0; i < MaxMELDevices; i++) {
     Serial.print(pomps[i]);
     Serial.print(" ");
     Serial.print(pins[i]);
     Serial.println();
   }
-  
+
   ConnectWIFI();
-  
-  
+
+
   Serial.println("");
   Serial.print("Connected to WiFi network with IP Address: ");
   Serial.println(WiFi.localIP());
@@ -492,22 +523,39 @@ void setup() {
     request->send(LittleFS, "/style.css", "text/css");
   });
   server.on("/getpomp", HTTP_GET, [](AsyncWebServerRequest * request) {
-    for (uint8_t i = 0; i < 8;i++)
+    for (uint8_t i = 0; i < MaxMELDevices; i++)
       if (pomps[i] == (request->getParam(0))->value())
         request->send_P(200, "text/plain", pompsState[i] == true ? "1" : "0");
-    
+
+  });
+  server.on("/autoupdate", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", autoMode == true ? "1" : "0");
+  });
+  server.on("/heap", HTTP_GET, [](AsyncWebServerRequest * request) {
+    request->send_P(200, "text/plain", (String(ESP.getFreeHeap())).c_str());
+  });
+  server.on("/autoupdate", HTTP_POST, [](AsyncWebServerRequest * request) {
+    autoMode = ((request->getParam(0))->value()) == "1" ? true : false;
+    request->send_P(200, "text/plain", "");
   });
   server.on("/devices", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (APMode) request->send_P(200, "text/plain", "");
     else request->send_P(200, "text/plain", cred.devices.c_str());
+  });
+  server.on("/getpins", HTTP_GET, [](AsyncWebServerRequest * request) {
+    String out = "[";
+    for (uint8_t i = 0; i < MaxMELDevices; i++) {
+      out += (pompsState[i] == true ? "1" : "0");
+      if (i < 7) out += ",";
+      else out += "]";
+    }
+    request->send_P(200, "text/plain", out.c_str());
   });
   server.on("/restart", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", "");
     ESP.restart();
   });
   server.on("/setpomp", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println((request->getParam(0))->value());
-    Serial.println(((((request->getParam(1))->value())).toInt() == 1 ? true : false));
     SetPompMode((request->getParam(0))->value(), ((((request->getParam(1))->value())).toInt() == 1 ? true : false));
 
     request->send_P(200, "text/plain", "");
@@ -535,7 +583,7 @@ void setup() {
       pins[i] = (p->value()).toInt();
     }
 
-    SavePins(pomps, pins,rooms, paramsNr);
+    SavePins(pomps, pins, rooms, paramsNr);
 
     request->send_P(200, "text/plain", "");
   });
@@ -580,6 +628,7 @@ void setup() {
     cred.pass = ((request->getParam(1))->value());
 
     SaveSettingsToFS();
+    LoginMELCloud();
 
     request->send_P(200, "text/plain", "");
   });
@@ -587,7 +636,7 @@ void setup() {
   server.begin();
 
   ArduinoOTA.setHostname("waterpump");
-  ArduinoOTA.setPassword((const char *)"Qawsed123");
+  //ArduinoOTA.setPassword((const char *)"Qawsed123");
 
   ArduinoOTA.onStart([]() {
     Serial.println("Start");  //  "Начало OTA-апдейта"
@@ -614,21 +663,32 @@ void setup() {
   });
   ArduinoOTA.begin();
 
-  LoginMELCloud();
+  for (uint8_t i = 0; i < 5; i++)
+    if (LoginMELCloud()) break;
 }
 
 
 void loop() {
   MDNS.update();
+  ArduinoOTA.handle();
+  ESP.wdtFeed();
+
   if ((millis() - lastTime) > timerDelay) {
-    
+    if (ESP.getFreeHeap() < 3000) {
+      Serial.println("ESP REBOOT HEAP IS SMALL!!!");
+      Serial.print("HEAP: ");
+      Serial.print(ESP.getFreeHeap());
+      Serial.print(" kb");
+      ESP.restart();
+    }
+
     if (!APMode) cred.devices = GetDataFromMELCloud();
     else {
       int n = WiFi.scanNetworks();
       for (int i = 0; i < n; i++)
       {
         Serial.println(String(i) + ") " + WiFi.SSID(i));
-        if (WiFi.SSID(i) == cred.SSID){
+        if (WiFi.SSID(i) == cred.SSID) {
           APMode = false;
           ConnectWIFI();
         }
@@ -637,7 +697,7 @@ void loop() {
     }
     //Serial.println(cred.devices);
     lastTime = millis();
-  
-    
+
+
   }
 }
