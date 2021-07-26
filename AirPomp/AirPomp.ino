@@ -8,8 +8,6 @@
 #include <LittleFS.h>
 #include <ESPAsyncTCP.h>
 #include "ESPAsyncWebServer.h"
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
 #include <Wire.h>    // Required for I2C communication
 #include <PCF8574.h>
 
@@ -28,6 +26,8 @@ uint8_t pins[MaxMELDevices];
 bool pompsState[MaxMELDevices];
 bool APMode;
 bool autoMode = true;
+bool waitMode = false;
+int countReboot = 0;
 
 struct {
   String SSID;
@@ -38,6 +38,11 @@ struct {
   String user;
   String devices;
 } cred;
+
+void notFound(AsyncWebServerRequest *request) {
+  Serial.println(request->url());
+  request->send(404, "text/plain", "Not found");
+}
 
 String processor(const String& var) {
   if (var == "SSID") return cred.SSID;
@@ -70,26 +75,54 @@ bool LoginMELCloud() {
       String payload = http.getString();
       //Print the response payload
       Serial.println(payload);
-      DynamicJsonDocument jsonBuffer(2048);
-      DeserializationError error = deserializeJson(jsonBuffer, payload.c_str());
+      http.end();
+      
+      String searchWords[3];
+      searchWords[0] = '"';
+      searchWords[0] += "ErrorId";
+      searchWords[0] += '"';
+      searchWords[0] += ':';
+      searchWords[1] = '"';
+      searchWords[1] += "ContextKey";
+      searchWords[1] += '"';
+      searchWords[1] += ':';
+      searchWords[2] = '"';
+      searchWords[2] += "Name";
+      searchWords[2] += '"';
+      searchWords[2] += ':';
+      searchWords[2] += '"';
+       
 
-      if (error) {
-        Serial.println(error.c_str());
-        http.end();
-        return false;
-      }
-
-      if (jsonBuffer["ErrorId"].as<int>() == 0) {
-        cred.token = jsonBuffer["LoginData"]["ContextKey"].as<String>();
-        cred.user = jsonBuffer["LoginData"]["Name"].as<String>();
+      int idxWord = payload.indexOf(searchWords[0]);
+      int lenData = 0;
+      for (int i = idxWord; i < payload.length();i++)
+        if (payload[i] != ',') lenData++;
+        else break;
+      String ErrorID = payload.substring(idxWord+searchWords[0].length(),idxWord+lenData);
+      
+      if (ErrorID == "null") {
+        idxWord = payload.indexOf(searchWords[1]);
+        lenData = 0;
+        for (int i = idxWord; i < payload.length();i++)
+          if (payload[i] != ',') lenData++;
+          else break;
+        cred.token = payload.substring(idxWord+searchWords[1].length()+1,idxWord+lenData-1);
+  
+        idxWord = payload.indexOf(searchWords[2]);
+        lenData = 0;
+        for (int i = idxWord; i < payload.length();i++)
+          if (payload[i] != ',') lenData++;
+          else break;
+        cred.user = payload.substring(idxWord+searchWords[2].length(),idxWord+lenData-1);
+      
         Serial.println(cred.token);
         Serial.println(cred.user);
-        http.end();
+        
         return true;
       }
       else {
         Serial.println("Error connect to MELCloud!");
-        Serial.print(jsonBuffer["ErrorId"].as<int>());
+        Serial.print(ErrorID);
         http.end();
         return false;
       }
@@ -131,14 +164,14 @@ String GetDataFromMELCloud() {
       int len = http.getSize();
 
       // create buffer for read
-      uint8_t buff[256] = { 0 };
+      uint8_t buff[128] = { 0 };
 
       // get tcp stream
       WiFiClient* stream = http.getStreamPtr();
 
       // read all data from server
       String buffBlock = "";
-      int lenBlock = 256;
+      int lenBlock = 128;
       uint8_t maxLenWord = 50;
       uint8_t countWords = 6;
       String searchWords[countWords] = { "", "", "", "", "" };
@@ -169,6 +202,7 @@ String GetDataFromMELCloud() {
       String out;
       while (http.connected() && (len > 0 || len == -1)) {
         // get available data size
+        ESP.wdtFeed();
         size_t size = stream->available();
 
         if (size) {
@@ -214,6 +248,8 @@ String GetDataFromMELCloud() {
               for (int y = idx; y < k.length(); y++) {
                 if (k[y] != ',') lenData += 1;
                 else break;
+
+                ESP.wdtFeed();
               }
 
               //if (i == 1 || i == 3 || i == 4) Serial.println(k.substring(idx + searchWords[i].length(), idx + lenData));
@@ -235,10 +271,10 @@ String GetDataFromMELCloud() {
           if (len > 0) {
             len -= c;
           }
+          delay(5); 
         }
-        delay(1);
       }
-
+      http.end();
       StaticJsonDocument<1024> docJson;
       JsonObject doc_device;
 
@@ -277,7 +313,7 @@ String GetDataFromMELCloud() {
         //Serial.println(httpResponseCode);
 
         // Free resources
-        http.end();
+        
 
         return jsonOut;
       }
@@ -375,7 +411,6 @@ void SavePins(String pomps_save[], uint8_t pins_save[], String names[], uint8_t 
   }
 }
 
-
 void ConnectWIFI() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(cred.SSID.c_str(), cred.SSIDPass.c_str());
@@ -424,8 +459,10 @@ void SetPompMode(String mac, bool state) {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  ESP.wdtDisable();
+  ESP.wdtEnable(WDTO_4S);
 
-  //expander.begin(0x20);
+  expander.begin(0x20);
 
   if (LittleFS.begin()) {
     Serial.println("LittleFS Initialize....ok");
@@ -433,14 +470,8 @@ void setup() {
     Serial.println("LittleFS Initialization...failed");
   }
 
-
-  //
-  //
-  //  expander.pinMode(0, OUTPUT);
-  //  expander.pinMode(1, OUTPUT);
-  //  expander.pinMode(2, OUTPUT);
-  //  expander.pinMode(3, OUTPUT);
-  //  expander.pinMode(4, OUTPUT);
+  for (uint8_t i = 0; i < MaxMELDevices; i++)
+    expander.pinMode(i, OUTPUT);
 
   File settings = LittleFS.open("/settings.json", "r");
   if (settings) {
@@ -543,13 +574,15 @@ void setup() {
     else request->send_P(200, "text/plain", cred.devices.c_str());
   });
   server.on("/getpins", HTTP_GET, [](AsyncWebServerRequest * request) {
-    String out = "[";
-    for (uint8_t i = 0; i < MaxMELDevices; i++) {
-      out += (pompsState[i] == true ? "1" : "0");
-      if (i < 7) out += ",";
-      else out += "]";
+    if (!waitMode) {
+      String out = "[";
+      for (uint8_t i = 0; i < MaxMELDevices; i++) {
+        out += (pompsState[i] == true ? "1" : "0");
+        if (i < 7) out += ",";
+        else out += "]";
+      }
+      request->send_P(200, "text/plain", out.c_str());
     }
-    request->send_P(200, "text/plain", out.c_str());
   });
   server.on("/restart", HTTP_GET, [](AsyncWebServerRequest * request) {
     request->send_P(200, "text/plain", "");
@@ -628,40 +661,12 @@ void setup() {
     cred.pass = ((request->getParam(1))->value());
 
     SaveSettingsToFS();
-    LoginMELCloud();
 
     request->send_P(200, "text/plain", "");
   });
-
+  server.onNotFound(notFound);
+  
   server.begin();
-
-  ArduinoOTA.setHostname("waterpump");
-  //ArduinoOTA.setPassword((const char *)"Qawsed123");
-
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start");  //  "Начало OTA-апдейта"
-
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");  //  "Завершение OTA-апдейта"
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    //  "Ошибка при аутентификации"
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    //  "Ошибка при начале OTA-апдейта"
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    //  "Ошибка при подключении"
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    //  "Ошибка при получении данных"
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-    //  "Ошибка при завершении OTA-апдейта"
-  });
-  ArduinoOTA.begin();
 
   for (uint8_t i = 0; i < 5; i++)
     if (LoginMELCloud()) break;
@@ -669,11 +674,17 @@ void setup() {
 
 
 void loop() {
+  delay(10); 
   MDNS.update();
-  ArduinoOTA.handle();
   ESP.wdtFeed();
 
+  
+  
   if ((millis() - lastTime) > timerDelay) {
+    countReboot++;
+    for (int i = 0; i < MaxMELDevices; i++)
+      expander.digitalWrite(i,pompsState[i]);
+    
     if (ESP.getFreeHeap() < 3000) {
       Serial.println("ESP REBOOT HEAP IS SMALL!!!");
       Serial.print("HEAP: ");
@@ -682,7 +693,13 @@ void loop() {
       ESP.restart();
     }
 
-    if (!APMode) cred.devices = GetDataFromMELCloud();
+    if (!APMode) {
+      //waitMode = true;
+      //delay(100);
+      cred.devices = GetDataFromMELCloud();
+      //delay(100);
+      //waitMode = false;
+    }
     else {
       int n = WiFi.scanNetworks();
       for (int i = 0; i < n; i++)
@@ -698,6 +715,6 @@ void loop() {
     //Serial.println(cred.devices);
     lastTime = millis();
 
-
+    if (countReboot == 2160) ESP.restart();
   }
 }
