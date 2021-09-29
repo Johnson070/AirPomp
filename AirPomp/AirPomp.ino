@@ -10,24 +10,30 @@
 #include "ESPAsyncWebServer.h"
 #include <Wire.h>    // Required for I2C communication
 #include <PCF8574.h>
-
-#define MaxMELDevices 8
+#include "Ticker.h"
+#define MaxMELDevices 5
 
 PCF8574 expander;
+Ticker PowerPomps;
+//Ticker PowerOffPomps;
+
 String MELCloud = "https://app.melcloud.com/Mitsubishi.Wifi.Client";
-
-
 unsigned long lastTime = 0;
-unsigned long timerDelay = 5000;
+unsigned long timerDelay = 15000;
+
 AsyncWebServer server(80);
-String pomps[MaxMELDevices];
-String rooms[MaxMELDevices];
-uint8_t pins[MaxMELDevices];
-bool pompsState[MaxMELDevices];
+String pomps[MaxMELDevices+3];
+String rooms[MaxMELDevices+3];
+uint8_t pins[MaxMELDevices+3];
+bool pompsState[MaxMELDevices+3];
 bool APMode;
 bool autoMode = true;
 bool waitMode = false;
 int countReboot = 0;
+
+bool SDTPomp = false;
+bool EnabledPomp = false;
+
 
 struct {
   String SSID;
@@ -37,7 +43,21 @@ struct {
   String token;
   String user;
   String devices;
+  int enabTime = 10000;
+  int perTime = 5000;
 } cred;
+
+bool deleteWater = false;
+bool deleteWater1 = false;
+unsigned long lastTimeDelWater = 0;
+unsigned long timerDelayDelWater = 10000;
+
+unsigned long lastTimeDelWater1 = 0;
+unsigned long timerDelayDelWater1 = 5000;
+
+unsigned long lastSTDPomp = 0;
+unsigned long lastEnablePomp = 0;
+
 
 void notFound(AsyncWebServerRequest *request) {
   Serial.println(request->url());
@@ -52,6 +72,9 @@ String processor(const String& var) {
   else if (var == "PASS") return cred.pass;
   else if (var == "DEVICES") return "-----";
   else if (var == "TOKEN") return cred.token;
+  else if (var == "enabTime") return String(timerDelayDelWater);
+  else if (var == "perTime") return String(timerDelayDelWater1);
+  else if (var == "UPTIME") return String(millis()/1000/60);
   else return "NODATA";
 }
 
@@ -337,11 +360,13 @@ String GetDataFromMELCloud() {
 void SaveSettingsToFS() {
   File settings = LittleFS.open("settings.json", "w");
   if (settings) {
-    StaticJsonDocument<256> docSettings;
+    StaticJsonDocument<512> docSettings;
     docSettings["SSID"] = cred.SSID;
     docSettings["SSIDPass"] = cred.SSIDPass;
     docSettings["email"] = cred.email;
     docSettings["pass"] = cred.pass;
+    docSettings["tm1"] = timerDelayDelWater;
+    docSettings["tm2"] = timerDelayDelWater1;
 
     String jsonSettings;
     serializeJson(docSettings, jsonSettings);
@@ -415,12 +440,13 @@ void ConnectWIFI() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(cred.SSID.c_str(), cred.SSIDPass.c_str());
   Serial.println("Connecting");
+  expander.digitalWrite(7,LOW);
 
   int count = 0;
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-
+    expander.blink(5,1,300);
     count++;
 
     if (count == 25)
@@ -432,6 +458,7 @@ void ConnectWIFI() {
   if (false) {
 APModeGoto:
     APMode = true;
+    expander.digitalWrite(7,HIGH);
     WiFi.mode(WIFI_AP);
     WiFi.softAP((const char*)"WaterPump", (const char*)"Qawsed123");
   }
@@ -440,7 +467,7 @@ APModeGoto:
 void SetPompMode(String mac, bool state) {
   for (int i = 0; i < MaxMELDevices; i++) {
     if (pomps[i] != "") {
-      for (int y = 1; y < 9; y++) {
+      for (int y = 1; y < MaxMELDevices+1; y++) {
         if (pomps[i] == mac && pins[i] == y) {
           pompsState[pins[i]-1] = state;
 //          Serial.print(pomps[i]);
@@ -456,11 +483,33 @@ void SetPompMode(String mac, bool state) {
   }
 }
 
+void SDTTimer(){
+  SDTPomp = true;
+}
+
+void PompTimer() {
+  EnabledPomp = true;
+}
+
+//void PompTicker(){
+////  bool pompsStateOLD[MaxMELDevices+3];
+////  for (int i = 0; i < MaxMELDevices+3;i++)
+////    pompsStateOLD[i] = 
+//  
+//  for (int i = 0; i < MaxMELDevices;i++)
+//      if (pompsState[i]) {
+//        expander.digitalWrite(i,HIGH);
+//        delay(pwmT2-pwmT1);
+//        expander.digitalWrite(i,LOW);
+//        delay(pwmT1);
+//      }
+//}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
   ESP.wdtDisable();
-  ESP.wdtEnable(WDTO_4S);
+  ESP.wdtEnable(WDTO_8S);
 
   expander.begin(0x20);
 
@@ -470,8 +519,12 @@ void setup() {
     Serial.println("LittleFS Initialization...failed");
   }
 
-  for (uint8_t i = 0; i < MaxMELDevices; i++)
+  for (uint8_t i = 0; i < MaxMELDevices+3; i++)
     expander.pinMode(i, OUTPUT);
+
+  expander.blink(5,3,300);
+  expander.blink(6,3,300);
+  expander.blink(7,3,300);
 
   File settings = LittleFS.open("/settings.json", "r");
   if (settings) {
@@ -493,6 +546,10 @@ void setup() {
     cred.SSIDPass = jsonSettings["SSIDPass"].as<String>();
     cred.email = jsonSettings["email"].as<String>();
     cred.pass = jsonSettings["pass"].as<String>();
+    cred.enabTime = jsonSettings["tm1"].as<int>();
+    cred.perTime = jsonSettings["tm2"].as<int>();
+    timerDelayDelWater = cred.enabTime;
+    timerDelayDelWater1 = cred.perTime;
   }
 
   File pompsFile = LittleFS.open("/pomps.json", "r");
@@ -519,7 +576,7 @@ void setup() {
       count++;
     }
 
-    for (uint8_t i = count; i < 8; i++)
+    for (uint8_t i = count; i < MaxMELDevices; i++)
     {
       pomps[count] = "";
       pins[count] = 255;
@@ -548,55 +605,75 @@ void setup() {
   Serial.println("mDNS responder started");
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send(LittleFS, "/index.html", String(), false, processor);
   });
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send(LittleFS, "/style.css", "text/css");
   });
   server.on("/getpomp", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     for (uint8_t i = 0; i < MaxMELDevices; i++)
       if (pomps[i] == (request->getParam(0))->value())
         request->send_P(200, "text/plain", pompsState[i] == true ? "1" : "0");
 
   });
   server.on("/autoupdate", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send_P(200, "text/plain", autoMode == true ? "1" : "0");
   });
   server.on("/heap", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send_P(200, "text/plain", (String(ESP.getFreeHeap())).c_str());
   });
   server.on("/autoupdate", HTTP_POST, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     autoMode = ((request->getParam(0))->value()) == "1" ? true : false;
     request->send_P(200, "text/plain", "");
   });
   server.on("/devices", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     if (APMode) request->send_P(200, "text/plain", "");
     else request->send_P(200, "text/plain", cred.devices.c_str());
   });
   server.on("/getpins", HTTP_GET, [](AsyncWebServerRequest * request) {
-    if (!waitMode) {
+    while (waitMode);
       String out = "[";
       for (uint8_t i = 0; i < MaxMELDevices; i++) {
         out += (pompsState[i] == true ? "1" : "0");
-        if (i < 7) out += ",";
+        if (i < MaxMELDevices-1) out += ",";
         else out += "]";
       }
       request->send_P(200, "text/plain", out.c_str());
-    }
+    
   });
   server.on("/restart", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send_P(200, "text/plain", "");
     ESP.restart();
   });
+  server.on("/settimer", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
+    timerDelayDelWater = (request->getParam(0))->value().toInt();
+    timerDelayDelWater1 = (request->getParam(1))->value().toInt();
+
+    SaveSettingsToFS();
+  
+    request->send_P(200, "text/plain", "");
+  });
   server.on("/setpomp", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     SetPompMode((request->getParam(0))->value(), ((((request->getParam(1))->value())).toInt() == 1 ? true : false));
 
     request->send_P(200, "text/plain", "");
   });
   server.on("/pomps", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     request->send(LittleFS, "/pomps.json", "text/plain");
   });
   server.on("/saveDevices", HTTP_GET, [](AsyncWebServerRequest * request) {
+    while (waitMode);
     int paramsNr = request->params();
 
 
@@ -621,19 +698,20 @@ void setup() {
     request->send_P(200, "text/plain", "");
   });
   server.on("/saveWifi", HTTP_GET, [](AsyncWebServerRequest * request) {
-    int paramsNr = request->params();
-    for (int i = 0; i < paramsNr; i++) {
-
-      AsyncWebParameter* p = request->getParam(i);
-
-      Serial.print("Param name: ");
-      Serial.println(p->name());
-
-      Serial.print("Param value: ");
-      Serial.println(p->value());
-
-      Serial.println("------");
-    }
+    while (waitMode);
+//    int paramsNr = request->params();
+////    for (int i = 0; i < paramsNr; i++) {
+////
+////      AsyncWebParameter* p = request->getParam(i);
+//////
+//////      Serial.print("Param name: ");
+//////      Serial.println(p->name());
+//////
+//////      Serial.print("Param value: ");
+//////      Serial.println(p->value());
+//////
+//////      Serial.println("------");
+////    }
 
     cred.SSID = ((request->getParam(0))->value());
     cred.SSIDPass = ((request->getParam(1))->value());
@@ -643,19 +721,20 @@ void setup() {
     request->send_P(200, "text/plain", "");
   });
   server.on("/saveMEL", HTTP_GET, [](AsyncWebServerRequest * request) {
-    int paramsNr = request->params();
-    for (int i = 0; i < paramsNr; i++) {
-
-      AsyncWebParameter* p = request->getParam(i);
-
-      Serial.print("Param name: ");
-      Serial.println(p->name());
-
-      Serial.print("Param value: ");
-      Serial.println(p->value());
-
-      Serial.println("------");
-    }
+    while (waitMode);
+//    int paramsNr = request->params();
+//    for (int i = 0; i < paramsNr; i++) {
+//
+//      AsyncWebParameter* p = request->getParam(i);
+//
+////      Serial.print("Param name: ");
+////      Serial.println(p->name());
+////
+////      Serial.print("Param value: ");
+////      Serial.println(p->value());
+////
+////      Serial.println("------");
+//    }
 
     cred.email = ((request->getParam(0))->value());
     cred.pass = ((request->getParam(1))->value());
@@ -669,8 +748,11 @@ void setup() {
   server.begin();
 
   for (uint8_t i = 0; i < 5; i++)
-    if (LoginMELCloud()) break;
+    if ((WiFi.status() != WL_CONNECTED || cred.token == "") && LoginMELCloud()) break;
+
+  //PowerPomps.attach_ms((pwmT2-pwmT1)+pwmT1, PompTicker);
 }
+
 
 
 void loop() {
@@ -678,12 +760,53 @@ void loop() {
   MDNS.update();
   ESP.wdtFeed();
 
-  
+  if (millis() - lastSTDPomp >= 20*60*1000) {
+    SDTTimer();
+    lastSTDPomp = millis();
+  }
+
+  if (millis() - lastEnablePomp >= timerDelayDelWater) {
+    PompTimer();
+    lastEnablePomp = millis();
+  }
+
+  if (SDTPomp && !deleteWater) {
+    for (int i = 0; i < MaxMELDevices; i++)
+      if (pompsState[i] == false)
+        expander.digitalWrite(i,HIGH);
+    
+    lastTimeDelWater = millis();
+    deleteWater = true;
+    SDTPomp = false;
+  }
+  else if ((millis() - lastTimeDelWater) > timerDelayDelWater && deleteWater) {
+    for (int i = 0; i < MaxMELDevices; i++)
+      if (pompsState[i] == false)
+        expander.digitalWrite(i,LOW);
+
+    deleteWater = false;
+  }
+
+  if (EnabledPomp && !deleteWater1) {
+    for (int i = 0; i < MaxMELDevices; i++)
+      if (pompsState[i] == true)
+        expander.digitalWrite(i,HIGH);
+    
+    lastTimeDelWater1 = millis();
+    deleteWater1 = true;
+    EnabledPomp = false;
+  }
+  else if ((millis() - lastTimeDelWater1) > timerDelayDelWater1 && deleteWater1) {
+    for (int i = 0; i < MaxMELDevices; i++)
+        expander.digitalWrite(i,LOW);
+
+    deleteWater1 = false;
+  }
   
   if ((millis() - lastTime) > timerDelay) {
     countReboot++;
-    for (int i = 0; i < MaxMELDevices; i++)
-      expander.digitalWrite(i,pompsState[i]);
+//    for (int i = 0; i < MaxMELDevices; i++)
+//      expander.digitalWrite(i,pompsState[i]);
     
     if (ESP.getFreeHeap() < 3000) {
       Serial.println("ESP REBOOT HEAP IS SMALL!!!");
@@ -694,11 +817,14 @@ void loop() {
     }
 
     if (!APMode) {
-      //waitMode = true;
-      //delay(100);
+      waitMode = true;
+      expander.toggle(6);
+      delay(100);
       cred.devices = GetDataFromMELCloud();
-      //delay(100);
-      //waitMode = false;
+      //server.begin();
+      delay(100);
+      expander.toggle(6);
+      waitMode = false;
     }
     else {
       int n = WiFi.scanNetworks();

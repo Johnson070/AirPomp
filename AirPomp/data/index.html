@@ -31,8 +31,18 @@
 <p><a onclick="refresh()"><input type="button" value="Refresh" id="saveButton"></a></p>
 <p><a onclick="saveDevices()"><input type="button" value="Save" id="saveButton"></a></p>
 </div>
+
+<div id="blockSet" class="timerDiv">
+<p id="texthelp">Timers</p>
+<p id="devices"></p>
+<p>Timer enable: <input type="text" id="enabTime" value="%enabTime%"></p>
+<p>Period enable: <input type="text" id="perTime" value="%perTime%"></p>
+<p><a onclick="savepwm()"><input type="button" value="Save" id="saveButton"></a></p>
+</div>
+
 <p>Current API token: %TOKEN%</p>
 <p id="HEAP">FREE RAM: 0 Kb</p>
+<p id="HEAP">UPTIME: %UPTIME% m</p>
 <p><a onclick="restart()"><input type="button" value="Reboot ESP" id="saveButton"></a></p>
 </body>
 <center>
@@ -47,6 +57,14 @@ function sleep(milliseconds) {
             break;
         }
     }
+}
+
+function savepwm() {
+  var request = 't1=' + document.getElementById('enabTime').value + '&t2='+ document.getElementById('perTime').value;
+  var xhttp = new XMLHttpRequest();
+
+  xhttp.open("GET", "/settimer?"+request, true);
+  xhttp.send();
 }
 
 function autosetpomp() {
@@ -77,7 +95,7 @@ function refresh() {
   xhttp.open("GET", "/autoupdate", true);
   xhttp.send();
 
-  sleep(500);
+  sleep(100);
 
   var jsonPins = '';
   var xhttp = new XMLHttpRequest();
@@ -90,7 +108,7 @@ function refresh() {
   xhttp.open("GET", "/getpins", true);
   xhttp.send();
 
-   sleep(500);
+   sleep(100);
 
   var AP = false;
   var xhttp = new XMLHttpRequest();
@@ -121,7 +139,7 @@ function refresh() {
   xhttp.open("GET", "/devices", true);
   xhttp.send();
 
-   sleep(2000);
+   sleep(200);
 
   var xhttp = new XMLHttpRequest();
   xhttp.onreadystatechange = function() {
