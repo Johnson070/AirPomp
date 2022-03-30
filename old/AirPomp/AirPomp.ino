@@ -1,4 +1,4 @@
-//{"SSID":"Home","SSIDPass":"89052299312","email":"anton.shokin@gmail.com","pass":"Qawsed123"}
+
 
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -10,11 +10,10 @@
 #include "ESPAsyncWebServer.h"
 #include <Wire.h>    // Required for I2C communication
 #include <PCF8574.h>
-#include "Ticker.h"
 #define MaxMELDevices 5
 
 PCF8574 expander;
-Ticker PowerPomps;
+//Ticker PowerPomps;
 //Ticker PowerOffPomps;
 
 String MELCloud = "https://app.melcloud.com/Mitsubishi.Wifi.Client";
@@ -58,6 +57,23 @@ unsigned long timerDelayDelWater1 = 5000;
 unsigned long lastSTDPomp = 0;
 unsigned long lastEnablePomp = 0;
 
+String* SplitString(char delim, String str){
+  int elem = 1;
+  for (int i = 0; i < str.length(); i++)
+    if (str[i] == delim) elem++;
+
+  String outStr[elem];
+
+  int idxStart = 0;
+  int idxStr = 0;
+  for (int i = 0; i < str.length(); i++)
+    if (str[i] == delim) {
+       outStr[idxStr++] = str.substring(idxStart, i);
+       idxStart = i+1; 
+    }
+
+  return outStr;
+}
 
 void notFound(AsyncWebServerRequest *request) {
   Serial.println(request->url());
@@ -187,17 +203,17 @@ String GetDataFromMELCloud() {
       int len = http.getSize();
 
       // create buffer for read
-      uint8_t buff[128] = { 0 };
+      uint8_t buff[256] = { 0 };
 
       // get tcp stream
       WiFiClient* stream = http.getStreamPtr();
 
       // read all data from server
       String buffBlock = "";
-      int lenBlock = 128;
+      int lenBlock = 256;
       uint8_t maxLenWord = 50;
       uint8_t countWords = 6;
-      String searchWords[countWords] = { "", "", "", "", "" };
+      String searchWords[countWords] = { "", "", "", "", "","" };
       searchWords[0] = "Devices";
       searchWords[0] += '"';
       searchWords[0] += ":[{";
@@ -267,14 +283,14 @@ String GetDataFromMELCloud() {
                 searchIdx--;
                 break;
               }
-
+        
               for (int y = idx; y < k.length(); y++) {
                 if (k[y] != ',') lenData += 1;
                 else break;
 
                 ESP.wdtFeed();
               }
-
+              //Serial.println(k.substring(idx,idx + lenData));
               //if (i == 1 || i == 3 || i == 4) Serial.println(k.substring(idx + searchWords[i].length(), idx + lenData));
               //                if (i == 0) doc_device = doc.createNestedObject();
               //                if (i==1) doc_device["name"] = k.substring(idx + searchWords[i].length() + 1, idx + lenData - 1);
@@ -298,10 +314,12 @@ String GetDataFromMELCloud() {
         }
       }
       http.end();
+      
       StaticJsonDocument<1024> docJson;
       JsonObject doc_device;
 
-
+      String outStr = "";
+      
       uint8_t codeWord = 0;
       String wordInStr;
       uint8_t roomIdx = 0;
@@ -377,7 +395,6 @@ void SaveSettingsToFS() {
 }
 
 void SavePins(String pomps_save[], uint8_t pins_save[], String names[], uint8_t count) {
-  StaticJsonDocument<1024> doc;
   String json;
 
 
@@ -388,50 +405,37 @@ void SavePins(String pomps_save[], uint8_t pins_save[], String names[], uint8_t 
       json += (char)settings.read();
     }
   }
+  settings.close();
 
   settings = LittleFS.open("/pomps.json", "w");
-
+  String saveSettings = "";
   if (settings) {
-    DeserializationError error = deserializeJson(doc, json);
-    JsonObject doc_device;
-
-    if (error) {
-      Serial.print(F("deserializeJson() failed: "));
-      Serial.println(error.f_str());
-      doc.clear();
-
-      for (uint8_t i = 0; i < count; i++) {
-        doc_device = doc.createNestedObject();
-        doc_device["mac"] = pomps_save[i];
-        doc_device["pin"] = pins_save[i];
-        doc_device["name"] = names[i];
-      }
-    }
-    else {
-      for (uint8_t i = 0; i < count; i++) {
-        bool match;
-        for (JsonObject elem : doc.as<JsonArray>()) {
-          if (doc["mac"] == pomps_save[i]) {
-            doc["pin"] = pins_save[i];
-            match = true;
-          }
+    for (uint8_t i = 0; i < count; i++) {
+      String* pompsStr = SplitString(0x0a, json);
+      
+      for (int j = 0; j < MaxMELDevices; j++) {
+        String* pompStr = SplitString('#', pompsStr[j])
+        if (pompStr[0] == pomps_save[i]) {
+          saveSettings += pompStr[0];
+          saveSettings += "#";
+          saveSettings += pompStr[1];
+          saveSettings += "#";
+          saveSettings += pompStr[2];
+          saveSettings += 0x0a;
+          match = true;
         }
-        if (!match) {
-          doc_device = doc.createNestedObject();
-          doc_device["mac"] = pomps_save[i];
-          doc_device["pin"] = pins_save[i];
-          doc_device["name"] = names[i];
+        else {
+          saveSettings += pomps_save[i];
+          saveSettings += "#";
+          saveSettings += pins_save[i];
+          saveSettings += "#";
+          saveSettings += names[i];
+          saveSettings += 0x0a;
         }
       }
     }
-
-
-
-    String out;
-    serializeJson(doc, out);
-    Serial.println(out);
-    settings.print(out);
-
+    
+    settings.print(saveSettings);
     settings.close();
   }
 }
@@ -534,20 +538,15 @@ void setup() {
     }
     Serial.println(json);
     settings.close();
-    StaticJsonDocument<512> jsonSettings;
 
-    DeserializationError error = deserializeJson(jsonSettings, json);
+    String* outSettings = SplitString('#',json);
 
-    if (error) {
-      Serial.println(error.c_str());
-    }
-
-    cred.SSID = jsonSettings["SSID"].as<String>();
-    cred.SSIDPass = jsonSettings["SSIDPass"].as<String>();
-    cred.email = jsonSettings["email"].as<String>();
-    cred.pass = jsonSettings["pass"].as<String>();
-    cred.enabTime = jsonSettings["tm1"].as<int>();
-    cred.perTime = jsonSettings["tm2"].as<int>();
+    cred.SSID = outSettings[0];
+    cred.SSIDPass = outSettings[1];
+    cred.email = outSettings[2];
+    cred.pass = outSettings[3];
+    cred.enabTime = outSettings[4].toInt();
+    cred.perTime = outSettings[5].toInt();
     timerDelayDelWater = cred.enabTime;
     timerDelayDelWater1 = cred.perTime;
   }
@@ -560,21 +559,23 @@ void setup() {
     }
     Serial.println(json);
     pompsFile.close();
-    StaticJsonDocument<768> jsonPomps;
 
-    DeserializationError error = deserializeJson(jsonPomps, json);
-
-    if (error) {
-      Serial.println(error.c_str());
-    }
+    String* pompsStr = SplitString(0x0a,json);
 
     uint8_t count = 0;
-    for (JsonObject elem : jsonPomps.as<JsonArray>()) {
 
-      pomps[count] = elem["mac"].as<String>(); // "323423423423423", "323423423423423", "323423423423423", ...
-      pins[count] = elem["pin"].as<uint8_t>(); // 8, 8, 8, 8, 8, 8, 8, 8
-      count++;
+    for (int i = 0; i < MaxMELDevices; i++){
+      String* pompStr = SplitString('#', pompsStr[i]);
+      pomps[count] = pomp[0];
+      pins[count++] = pomp[1].toInt();
     }
+    
+//    for (JsonObject elem : jsonPomps.as<JsonArray>()) {
+//
+//      pomps[count] = elem["mac"].as<String>(); // "323423423423423", "323423423423423", "323423423423423", ...
+//      pins[count] = elem["pin"].as<uint8_t>(); // 8, 8, 8, 8, 8, 8, 8, 8
+//      count++;
+//    }
 
     for (uint8_t i = count; i < MaxMELDevices; i++)
     {
@@ -749,8 +750,6 @@ void setup() {
 
   for (uint8_t i = 0; i < 5; i++)
     if ((WiFi.status() != WL_CONNECTED || cred.token == "") && LoginMELCloud()) break;
-
-  //PowerPomps.attach_ms((pwmT2-pwmT1)+pwmT1, PompTicker);
 }
 
 
@@ -808,7 +807,7 @@ void loop() {
 //    for (int i = 0; i < MaxMELDevices; i++)
 //      expander.digitalWrite(i,pompsState[i]);
     
-    if (ESP.getFreeHeap() < 3000) {
+    if (ESP.getFreeHeap() < 2000) {
       Serial.println("ESP REBOOT HEAP IS SMALL!!!");
       Serial.print("HEAP: ");
       Serial.print(ESP.getFreeHeap());
@@ -821,6 +820,7 @@ void loop() {
       expander.toggle(6);
       delay(100);
       cred.devices = GetDataFromMELCloud();
+      //Serial.println(cred.devices);
       //server.begin();
       delay(100);
       expander.toggle(6);
