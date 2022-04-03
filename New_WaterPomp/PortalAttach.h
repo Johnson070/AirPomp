@@ -64,10 +64,10 @@ void myUpdate(GyverPortal* p) {
     {
       p -> answer(cond_data[i].state);
     }
-    if (p -> update(("sw" + String(i)).c_str()))
-    {
-      p -> answer(cond_data[i].state);
-    }
+//    if (p -> update(("sw" + String(i)).c_str()))
+//    {
+//      p -> answer(cond_data[i].state);
+//    }
   }
 }
 
@@ -92,14 +92,12 @@ void build() {
   BUILD_BEGIN(s);
   add.THEME(GP_DARK);
 
-  String ajax_update = "";
+  String ajax_update = "uptime,heap";
   for (byte i = 0; i < MAX_MEL_DEVICES; i++)
     if (cond_data[i].name != "")
-      ajax_update += ("led" + String(i) + ",sw" + String(i) + ",");
-  ajax_update[ajax_update.length()-1] = '\0';
-
+      ajax_update += (",led" + String(i));
+  //ajax_update[ajax_update.length()-1] = '\0';
   add.AJAX_UPDATE(ajax_update.c_str(), 1000);
-  add.AJAX_UPDATE(PSTR("uptime,heap"), 1000);
 
   add.TITLE("ESP-01 Mel Cloud");
   add.LABEL("Hello,");
@@ -164,6 +162,9 @@ void build() {
   add.LABEL("NAN", "heap"); add.BREAK();
   add.BUTTON("rebootBtn", "Reboot");
   add.BLOCK_END();
+
+  AddScript(s);
+  QuerySwAuto(s);
   add.FORM_END();
 
   BUILD_END();

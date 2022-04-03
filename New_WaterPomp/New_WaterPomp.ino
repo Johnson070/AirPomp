@@ -1,4 +1,5 @@
-
+// демо с формой, значения компонентов связаны
+// с переменными в скетче
 #include <GyverPortal.h>
 #include <WiFiClientSecure.h>
 #include <ESP8266mDNS.h>
@@ -76,7 +77,7 @@ void setup() {
   ESP.wdtEnable(WDTO_8S);
   pinMode(2,OUTPUT);
 
-  //expander.begin(0x20);
+  expander.begin(0x20);
 
   for (uint8_t i = 0; i < 8; i++){
     expander.pinMode(i, OUTPUT);
@@ -149,7 +150,7 @@ void loop() {
     if (!stdState && (millis() - enabTimeMillis) <= cred.enabTime && enabState && !enabStateEnd) {
       for (int i = 0; i < MAX_MEL_DEVICES; i++)
         if (cond_data[i].state)
-          digitalWrite(2,HIGH);//Serial.println("enable " + cond_data[i].name + " ENABLE");
+          digitalWrite(cond_data[i].pin,HIGH);//Serial.println("enable " + cond_data[i].name + " ENABLE");
       enabState = false;
       //Serial.println();
     }
@@ -164,7 +165,7 @@ void loop() {
     if (!enabState && (millis() - stbTimeMillis) <= cred.stbTime && stdState && !stdStateEnd) {
       for (int i = 0; i < MAX_MEL_DEVICES; i++)
         if (cond_data[i].state)
-          digitalWrite(2,LOW);//Serial.println("standby " + cond_data[i].name + " \r\rDISABLE");
+          digitalWrite(cond_data[i].pin,LOW);//Serial.println("standby " + cond_data[i].name + " \r\rDISABLE");
       stdState = false;
       //Serial.println();
     }

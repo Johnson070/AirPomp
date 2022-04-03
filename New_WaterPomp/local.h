@@ -51,6 +51,25 @@ void outBTN(String &s, String name, String text, String a, String b) {
   s += " onclick=\"(function(){ GP_clickid('" + a + "','" + a + "'); setTimeout(GP_clickid('" + b + "','" + b + "'),500); setTimeout(GP_click(document.getElementById('" + name + "')),1000);})();\">\n";
 }
 
+void QuerySwAuto(String &s) {
+  s += "<script>document.getElementById('swAuto').onclick = function(){";
+  s += "var auto = document.querySelector('#swAuto').checked;";
+  s += "var len = document.querySelectorAll('.switch').length;";
+  s += "for (var i = 0; i < len-1; i++)";
+  s += "if (auto && document.getElementsByClassName('switch')[i].style.display == '') document.getElementsByClassName('switch')[i].style.display = 'none';";
+  s += "else if (document.getElementsByClassName('switch')[i].style.display == 'none') document.getElementsByClassName('switch')[i].style.display = '';GP_click(this);};</script>";
+}
+
+void AddScript(String &s) {
+  s += "<script>";
+  s += "var a = document.getElementById('swAuto').checked;";
+  s += "if (a) {";
+  s += "var len = document.querySelectorAll('.switch').length;";
+  s += "for (var i = 0; i < len-1; i++)";
+  s += "document.getElementsByClassName('switch')[i].style.display = 'none';}";
+  s += "</script>";
+}
+
 Settings_struct cred;
 MEL_data cond_data[MAX_MEL_DEVICES];
 dataForm data_form;
